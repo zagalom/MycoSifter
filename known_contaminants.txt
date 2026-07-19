@@ -1,0 +1,104 @@
+# ============================================================
+# OBLIGATE ENVIRONMENTAL FUNGAL TAXA
+# Format: LEVEL_ScientificName
+# LEVEL: P=Phylum, C=Class, O=Order, F=Family, G=Genus
+#
+# These taxa have NO known ability to colonize human mucosal
+# surfaces or cause human infection, even in immunocompromised
+# hosts. They are exclusively environmental.
+# ============================================================
+
+
+# ─────────────────────────────────────────────
+# WHOLE PHYLA (all members are environmental)
+# ─────────────────────────────────────────────
+
+# Arbuscular mycorrhizal fungi (obligate root symbionts)
+P_Glomeromycota
+
+# Aquatic/soil chytrids and allies
+P_Blastocladiomycota
+
+# Zoopagomycota (predatory/parasitic on amoebae, nematodes, etc.)
+P_Zoopagomycota
+
+
+# ─────────────────────────────────────────────
+# ORDERS (all members are environmental)
+# ─────────────────────────────────────────────
+
+# Rust fungi (obligate plant pathogens)
+O_Pucciniales
+
+# Soil/rhizosphere fungi
+O_Archaeorhizomycetes
+O_Spizellomycetales
+
+
+# ─────────────────────────────────────────────
+# FAMILIES (all members are environmental)
+# ─────────────────────────────────────────────
+
+# Powdery mildews (obligate plant pathogens)
+F_Erysiphaceae
+F_Olpidiaceae
+
+# Truffles (ectomycorrhizal, subterranean)
+F_Tuberaceae
+
+# Earthstars (saprophytic mushrooms)
+F_Geastraceae
+
+
+# ─────────────────────────────────────────────
+# GENERA — Ectomycorrhizal (obligate root symbionts)
+# ─────────────────────────────────────────────
+G_Amphinema
+G_Cantharellus
+G_Inocybe
+
+
+# ─────────────────────────────────────────────
+# GENERA — Arbuscular Mycorrhizal
+# ─────────────────────────────────────────────
+G_Ambispora
+G_Archaeospora
+
+
+# ─────────────────────────────────────────────
+# GENERA — Plant Pathogens (obligate)
+# ─────────────────────────────────────────────
+G_Erratomyces
+G_Epichloe
+G_Golovinomyces
+G_Podosphaera
+G_Taphrina
+G_Tilletia
+G_Itersonilia
+G_Thelonectria
+G_Udeniomyces
+G_Magnaporthe
+
+# ─────────────────────────────────────────────
+# GENERA — Saprophytic Mushrooms (Basidiomycota)
+# ─────────────────────────────────────────────
+G_Armillaria
+G_Bovista
+G_Caloboletus
+G_Calvatia
+G_Fomes
+
+
+# ─────────────────────────────────────────────
+# GENERA — Lichens (obligate symbionts with algae/cyanobacteria)
+# ─────────────────────────────────────────────
+G_Peltigera
+G_Usnea
+G_Verrucaria
+G_Xanthoparmelia
+
+
+# ─────────────────────────────────────────────
+# Without ID
+# ─────────────────────────────────────────────
+P_sp
