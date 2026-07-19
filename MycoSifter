@@ -61,8 +61,8 @@ suppressPackageStartupMessages({
 
 cat("\n")
 cat("╔══════════════════════════════════════════════════════╗\n")
-cat("║     FUNGAL CONTAMINANT REMOVER v1.0                  ║\n")
-cat("║     https://github.com/[user]/MycoSifter║\n")
+cat("║     MycoSifter v1.0                                  ║\n")
+cat("║     https://github.com/zagalom/MycoSifter            ║\n")
 cat("╚══════════════════════════════════════════════════════╝\n\n")
 
 # ============================================================
@@ -724,7 +724,7 @@ cat("  ✔ 05_pcoa_before_after.png\n")
 sink(file.path(output_dir, "00_REPORT.txt"))
 
 cat("========================================\n")
-cat("FUNGAL CONTAMINANT REMOVER v1.0\n")
+cat("MycoSifter v1.0\n")
 cat("COMPREHENSIVE ANALYSIS REPORT\n")
 cat("========================================\n\n")
 cat("Date:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
