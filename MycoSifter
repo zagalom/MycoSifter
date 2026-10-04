@@ -165,9 +165,27 @@ if(length(missing_ranks) > 0) {
 otu_mat <- as.data.frame(otu_table(ps))
 tax_mat <- as.data.frame(tax_table(ps))
 
+# ─── PRESERVE Species_ID from input ────────────────────────
+if (!"Species_ID" %in% colnames(tax_mat)) {
+  # Fallback: criar IDs únicos a partir do hash do OTU
+  otu_ids <- rownames(tax_mat)
+  tax_mat$Species_ID <- sapply(1:nrow(tax_mat), function(i) {
+    if (grepl("_sp$|_Ord_sp|_Fam_sp|_Cl_sp|_Phy_sp|_Gen_sp|Incertae", 
+              tax_mat[i, "Species"])) {
+      paste0(tax_mat[i, "Species"], "_", otu_ids[i])
+    } else {
+      tax_mat[i, "Species"]
+    }
+  })
+  cat("  ⚠ Species_ID criado (não estava no input)\n")
+} else {
+  cat("  ✔ Species_ID preservado do input\n")
+}
+
 # Fill NAs with parent-level placeholders
 for(i in 1:nrow(tax_mat)) {
   for(j in 2:ncol(tax_mat)) {
+    if (colnames(tax_mat)[j] == "Species_ID") next   # ← skip
     if(is.na(tax_mat[i, j]) || tax_mat[i, j] == "" || 
        grepl("unidentified|unknown", tax_mat[i, j], ignore.case = TRUE)) {
       parent_val <- tax_mat[i, j-1]
@@ -181,9 +199,9 @@ for(i in 1:nrow(tax_mat)) {
   }
 }
 
-# Manual agglomeration: sum reads by species, keep first taxonomy
-combined <- cbind(tax_mat[, required_ranks], otu_mat)
-combined$Species_ID <- combined$Species
+# Manual agglomeration: sum reads by Species_ID, keep first taxonomy
+combined <- cbind(tax_mat[, c(required_ranks, "Species_ID")], otu_mat)
+# NÃO fazer: combined$Species_ID <- combined$Species    ← era este o bug
 
 agg_reads <- combined %>%
   group_by(Species_ID) %>%
