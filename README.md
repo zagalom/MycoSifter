@@ -6,6 +6,8 @@ from human ITS amplicon sequencing data**
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![R ≥ 4.0](https://img.shields.io/badge/R-%E2%89%A54.0-blue)](https://www.r-project.org/)
 
+Author: Mariana M. Zagalo Fernandes
+
 ---
 
 ## 📖 Overview
