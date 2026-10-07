@@ -588,7 +588,7 @@ The sensitivity analysis compares outcomes at different stringency levels (k):
 ### Q: What's the difference between `p_method = "raw"` and `"fdr"`?
 **A:**
 - **`"raw"`**: No correction for multiple comparisons. Faster and more sensitive, but higher false positive rate.
-- **`"fdr"`**: Benjamini-Hochberg correction. More conservative and suitable for publication.
+- **`"fdr"`**: Benjamini-Hochberg correction. More conservative (may be more suitable for publication)
 
 ### Q: How do I know what `min_thresholds` to choose?
 **A:** Look at the sensitivity table (`sensitivity_analysis.tsv`) and the elbow plot (`01_sensitivity_panel.png`). Choose the **highest k** where Procrustes ≥ 0.98 and Spearman's ρ ≥ 0.95. These thresholds indicate good balance between removing contaminants and preserving true biology.
@@ -597,7 +597,7 @@ The sensitivity analysis compares outcomes at different stringency levels (k):
 **A:** Yes! Simply edit the configuration, change `output_dir` to a new name, and run again. All outputs are isolated in their respective directories, making it easy to compare results across parameter sets.
 
 ### Q: How long does the analysis take?
-**A:** Depends on dataset size. Typical runs (100–500 samples, 200–2000 species) take 5–20 minutes. Larger datasets may take an hour or more.
+**A:** Depends on dataset size. Typical runs (100–500 samples, 200–2000 species) take 1–2 minutes. Larger datasets may take longer.
 
 ---
 
@@ -636,7 +636,7 @@ Found a bug? Have a feature request? Please open an issue or submit a pull reque
 ## 📬 Contact
 
 **Mariana M. Zagalo Fernandes**  
-mariana@example.com  
+marianamzf@hotmail.com
 https://github.com/zagalom/MycoSifter
 
 ---
