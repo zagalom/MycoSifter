@@ -489,8 +489,8 @@ for(thresh_name in names(resultados_por_threshold)) {
 
 # Compute consistency metrics
 suspect_cols <- grep("^Suspect_", colnames(tabela_final), value = TRUE)
-fc_cols <- grep("^FC_", colnames(tabela_final), value = TRUE)
-p_cols <- grep("^p_", colnames(tabela_final), value = TRUE)
+fc_cols <- grep("^FC_[0-9]", colnames(tabela_final), value = TRUE)
+p_cols <- grep("^p_[^r]", colnames(tabela_final), value = TRUE)
 
 tabela_final$N_Suspect <- rowSums(tabela_final[, suspect_cols, drop = FALSE], na.rm = TRUE)
 tabela_final$N_FC2 <- apply(tabela_final[, fc_cols, drop = FALSE], 1, 
