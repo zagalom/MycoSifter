@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # ============================================================
 # MycoSifter v1.0
-# Automated detection and removal of environmental fungal 
+# Automated detection and removal of environmental fungal
 # contaminants from human ITS amplicon sequencing data
 #
 # Author: Mariana Zagalo Fernandes
@@ -9,15 +9,16 @@
 # License: MIT
 # ============================================================
 #
-# INPUT FILES (place in working directory):
-#   • otu_table.tsv       - OTU/ASV table (rows=OTUs, columns=samples)
-#   • taxonomy.tsv        - Taxonomy with columns: Kingdom,Phylum,Class,Order,Family,Genus,Species
-#   • metadata.tsv        - Sample metadata (must include DNA_Load column in ng/µL)
-#   • known_contaminants.txt - (Optional) List of known environmental taxa
+# INPUT FILES (place them in the working directory):
+#   • otu_table.tsv        - OTU/ASV table (rows = OTUs, columns = samples)
+#   • taxonomy.tsv         - Taxonomy table with columns:
+#                           Kingdom,Phylum,Class,Order,Family,Genus,Species
+#   • metadata.tsv         - Sample metadata (must include a DNA_Load column in ng/µL)
+#   • known_contaminants.txt - (Optional) list of known environmental taxa
 #
 # OUTPUT:
 #   • contaminant_analysis_output/ directory with all results
-#   • phyloseq_clean.rds - Cleaned phyloseq object
+#   • phyloseq_clean.rds - cleaned phyloseq object
 # ============================================================
 
 # ============================================================
@@ -34,17 +35,39 @@ contaminant_list_file <- "known_contaminants.txt"
 dna_column <- "DNA_Load"
 
 # --- MULTI-THRESHOLD SETTINGS ---
-fc_threshold <- 2           # Fold-change (Low/High DNA)
-p_threshold <- 0.05         # Wilcoxon p-value
-start_quantile <- 0.10      # Starting point for thresholds
-n_thresholds <- 9           # Number of thresholds
-threshold_step <- 5         # Step size (ng/µL)
+fc_threshold <- 2
+p_threshold  <- 0.05
+
+# --- THRESHOLD DESIGN MODE ---
+threshold_mode <- "quantile"   # "quantile" = recommended (balanced groups)
+# "uniform"  = classic Salter method (focused on the low-DNA end)
+# "linear"   = uniform spacing
+# "custom"   = explicit vector
+
+n_thresholds      <- 9          # number of thresholds (only for quantile/linear)
+start_quantile    <- 0.10       # lower bound (uniform/linear) or quantile_min
+quantile_max      <- 0.50       # upper percentile for quantile mode
+# (0.50 = median | 0.75 = third quartile | 0.90 = default)
+# beyond this point, the "High" group contains <10% of samples,
+# and the test loses statistical power
+threshold_max_frac <- 0.50      # absolute cap (fraction of max DNA) — applied to ALL modes
+threshold_step    <- NULL       # NULL = data-driven
+custom_thresholds <- NULL       # example: c(5, 10, 20, 40, 80)
+
+# --- CUTOFF SELECTION ---
+interactive_cutoff <- TRUE      # TRUE = ask the user after analysis
+min_thresholds_manual <- NULL   # used when interactive_cutoff = FALSE
+# NULL → default = 1
+
+# --- STATISTICAL METHOD ---
+p_method <- "raw"           # "raw" = raw p-value (default)
+# "fdr" = adjusted p-value (Benjamini-Hochberg)
 
 # --- USE ECOLOGICAL FILTER? ---
-use_ecological_filter <- TRUE  # If TRUE, also remove taxa from known_contaminants.txt
+use_ecological_filter <- TRUE  # If TRUE, also remove taxa listed in known_contaminants.txt
 
 # --- OUTPUT ---
-output_dir <- "contaminant_analysis_output"
+output_dir <- "contaminant_analysis_output_New"
 
 # ============================================================
 # 1. LOAD REQUIRED PACKAGES
@@ -73,28 +96,28 @@ cat("━━━ LOADING DATA ━━━━━━━━━━━━━━━━━�
 
 # --- OTU table ---
 cat("  [1/4] Loading OTU table:", otu_file, "\n")
-otu_raw <- read.table(otu_file, header = TRUE, sep = "\t", 
+otu_raw <- read.table(otu_file, header = TRUE, sep = "\t",
                       row.names = 1, check.names = FALSE)
 otu_raw <- as.matrix(otu_raw)
 mode(otu_raw) <- "numeric"
-cat(sprintf("        ✔ %d OTUs, %d samples, %s total reads\n", 
+cat(sprintf("        ✔ %d OTUs, %d samples, %s total reads\n",
             nrow(otu_raw), ncol(otu_raw), format(sum(otu_raw), big.mark=",")))
 
 # --- Taxonomy ---
 cat("  [2/4] Loading taxonomy:", tax_file, "\n")
-tax_raw <- read.table(tax_file, header = TRUE, sep = "\t", 
+tax_raw <- read.table(tax_file, header = TRUE, sep = "\t",
                       row.names = 1, fill = TRUE, comment.char = "")
-cat(sprintf("        ✔ %d OTUs, columns: %s\n", 
+cat(sprintf("        ✔ %d OTUs, columns: %s\n",
             nrow(tax_raw), paste(colnames(tax_raw), collapse=", ")))
 
 # --- Metadata ---
 cat("  [3/4] Loading metadata:", meta_file, "\n")
-metadata <- read.table(meta_file, header = TRUE, sep = "\t", 
+metadata <- read.table(meta_file, header = TRUE, sep = "\t",
                        row.names = 1, check.names = FALSE)
 
 # Find DNA concentration column
 if(!dna_column %in% colnames(metadata)) {
-  possible <- grep("dna|load|concentr|qubit|quantif", colnames(metadata), 
+  possible <- grep("dna|load|concentr|qubit|quantif", colnames(metadata),
                    ignore.case = TRUE, value = TRUE)
   if(length(possible) > 0) {
     cat(sprintf("        ⚠ '%s' not found. Using '%s'\n", dna_column, possible[1]))
@@ -118,7 +141,7 @@ if(use_ecological_filter && file.exists(contaminant_list_file)) {
   known_contaminants <- trimws(known_contaminants)
   cat(sprintf("        ✔ %d known contaminant taxa loaded\n", length(known_contaminants)))
 } else {
-  cat("  [4/4] No known contaminants file. Ecological filter disabled.\n")
+  cat("  [4/4] No known contaminants file found. Ecological filter disabled.\n")
   use_ecological_filter <- FALSE
   known_contaminants <- character(0)
 }
@@ -150,7 +173,7 @@ ps <- phyloseq(
 
 cat("\n━━━ AGGLOMERATING TO SPECIES LEVEL ━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-# Ensure required columns exist
+# Ensure the required taxonomic columns exist
 required_ranks <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
 missing_ranks <- setdiff(required_ranks, colnames(tax_aligned))
 
@@ -165,28 +188,28 @@ if(length(missing_ranks) > 0) {
 otu_mat <- as.data.frame(otu_table(ps))
 tax_mat <- as.data.frame(tax_table(ps))
 
-# ─── PRESERVE Species_ID from input ────────────────────────
+# ─── PRESERVE Species_ID from the input if present ────────────────
 if (!"Species_ID" %in% colnames(tax_mat)) {
-  # Fallback: criar IDs únicos a partir do hash do OTU
+  # Fallback: create unique IDs using the OTU hash
   otu_ids <- rownames(tax_mat)
   tax_mat$Species_ID <- sapply(1:nrow(tax_mat), function(i) {
-    if (grepl("_sp$|_Ord_sp|_Fam_sp|_Cl_sp|_Phy_sp|_Gen_sp|Incertae", 
+    if (grepl("_sp$|_Ord_sp|_Fam_sp|_Cl_sp|_Phy_sp|_Gen_sp|Incertae",
               tax_mat[i, "Species"])) {
       paste0(tax_mat[i, "Species"], "_", otu_ids[i])
     } else {
       tax_mat[i, "Species"]
     }
   })
-  cat("  ⚠ Species_ID criado (não estava no input)\n")
+  cat("  ⚠ Species_ID created (not present in the input)\n")
 } else {
-  cat("  ✔ Species_ID preservado do input\n")
+  cat("  ✔ Species_ID preserved from the input\n")
 }
 
-# Fill NAs with parent-level placeholders
+# Fill missing values with parent-level placeholders
 for(i in 1:nrow(tax_mat)) {
   for(j in 2:ncol(tax_mat)) {
-    if (colnames(tax_mat)[j] == "Species_ID") next   # ← skip
-    if(is.na(tax_mat[i, j]) || tax_mat[i, j] == "" || 
+    if (colnames(tax_mat)[j] == "Species_ID") next
+    if(is.na(tax_mat[i, j]) || tax_mat[i, j] == "" ||
        grepl("unidentified|unknown", tax_mat[i, j], ignore.case = TRUE)) {
       parent_val <- tax_mat[i, j-1]
       rank_name <- colnames(tax_mat)[j]
@@ -199,9 +222,9 @@ for(i in 1:nrow(tax_mat)) {
   }
 }
 
-# Manual agglomeration: sum reads by Species_ID, keep first taxonomy
+# Manual agglomeration: sum reads by Species_ID while keeping the first taxonomy
 combined <- cbind(tax_mat[, c(required_ranks, "Species_ID")], otu_mat)
-# NÃO fazer: combined$Species_ID <- combined$Species    ← era este o bug
+# DO NOT do: combined$Species_ID <- combined$Species
 
 agg_reads <- combined %>%
   group_by(Species_ID) %>%
@@ -245,15 +268,15 @@ prevalence_min <- 3
 abundance_min <- 30
 
 ps_filtered <- filter_taxa(ps_species,
-                           function(x) sum(x > 0) >= prevalence_min & 
+                           function(x) sum(x > 0) >= prevalence_min &
                              sum(x) >= abundance_min,
                            prune = TRUE)
 
-cat(sprintf("  Prevalence ≥ %d samples, Abundance ≥ %d total reads\n", 
+cat(sprintf("  Prevalence ≥ %d samples, abundance ≥ %d total reads\n",
             prevalence_min, abundance_min))
-cat(sprintf("  ✔ %d species retained (%.1f%%)\n", 
+cat(sprintf("  ✔ %d species retained (%.1f%%)\n",
             ntaxa(ps_filtered), 100*ntaxa(ps_filtered)/n_species))
-cat(sprintf("  ✔ %s reads retained (%.1f%%)\n", 
+cat(sprintf("  ✔ %s reads retained (%.1f%%)\n",
             format(sum(otu_table(ps_filtered)), big.mark=","),
             100*sum(otu_table(ps_filtered))/sum(otu_table(ps_species))))
 
@@ -262,39 +285,90 @@ cat(sprintf("  ✔ %s reads retained (%.1f%%)\n",
 # ============================================================
 
 cat("\n━━━ MULTI-THRESHOLD CONTAMINANT ANALYSIS ━━━━━━━━━━━━━━━\n\n")
+cat(sprintf("  Statistical method: %s (%s)\n",
+            toupper(p_method),
+            ifelse(p_method == "fdr", "BH-adjusted p-value", "raw p-value")))
 
 otu_filt <- as.data.frame(otu_table(ps_filtered))
 tax_filt <- as.data.frame(tax_table(ps_filtered))
 dna_load <- sample_data(ps_filtered)$DNA_Load
 names(dna_load) <- sample_names(ps_filtered)
-totais_amostra <- colSums(otu_filt)
+total_reads_per_sample <- colSums(otu_filt)
 
-# Generate thresholds
-q1 <- quantile(dna_load, start_quantile, na.rm = TRUE)
-start_threshold <- max(floor(q1 / 5) * 5, 5)
-thresholds <- seq(from = start_threshold, by = threshold_step, 
-                  length.out = n_thresholds)
-thresholds <- thresholds[thresholds <= max(dna_load) * 0.8]
+# ============================================================
+# Generate thresholds according to the selected mode
+# ============================================================
 
-if(length(thresholds) < 3) {
-  thresholds <- seq(5, min(50, max(dna_load)), by = threshold_step)
+max_use <- max(dna_load, na.rm = TRUE) * threshold_max_frac
+cat(sprintf("  Absolute cap: %s ng/µL (%.0f%% of max DNA)\n",
+            round(max_use, 1), threshold_max_frac * 100))
+
+if (threshold_mode == "custom" && !is.null(custom_thresholds)) {
+  thresholds <- as.numeric(custom_thresholds)
+  cat(sprintf("  Threshold mode: CUSTOM (%d values)\n", length(thresholds)))
+
+} else if (threshold_mode == "quantile") {
+  probs <- seq(start_quantile, quantile_max, length.out = n_thresholds)
+  thresholds <- as.numeric(round(quantile(dna_load, probs, na.rm = TRUE)))
+  cat(sprintf("  Threshold mode: QUANTILE (percentiles %.0f%% to %.0f%%)\n",
+              start_quantile * 100, quantile_max * 100))
+  cat("  Note: each cutoff k approximately separates k samples into the 'Low' group.\n")
+
+} else {
+  q1 <- quantile(dna_load, start_quantile, na.rm = TRUE)
+  start_threshold <- max(floor(q1 / 5) * 5, 5)
+
+  if (threshold_mode == "uniform") {
+    step <- if (is.null(threshold_step)) 5 else threshold_step
+    thresholds <- seq(start_threshold, max_use, by = step)
+    cat(sprintf("  Threshold mode: UNIFORM (classic low-biomass, step=%d ng/µL)\n", step))
+
+  } else {  # linear
+    if (is.null(threshold_step)) {
+      threshold_step <- max(floor((max_use - start_threshold) / n_thresholds), 1)
+    }
+    thresholds <- seq(start_threshold, by = threshold_step, length.out = n_thresholds)
+    cat(sprintf("  Threshold mode: LINEAR (step=%d ng/µL)\n", threshold_step))
+  }
+}
+
+# --- Universal cap (applies to ALL modes) ---
+n_before <- length(thresholds)
+thresholds <- thresholds[thresholds <= max_use]
+n_dropped <- n_before - length(thresholds)
+
+if (n_dropped > 0) {
+  cat(sprintf("  ⚠ %d threshold(s) removed because they exceed the cap of %.1f ng/µL\n",
+              n_dropped, max_use))
+}
+
+if (length(thresholds) < 3) {
+  stop(sprintf("Fewer than 3 valid thresholds remain after applying the cap (%.1f ng/µL). ",
+               max_use),
+       "Increase quantile_max or threshold_max_frac.")
 }
 
 cat(sprintf("  DNA Load thresholds: %s ng/µL\n", paste(thresholds, collapse=", ")))
 cat(sprintf("  Fold-change threshold: > %.1f\n", fc_threshold))
-cat(sprintf("  P-value threshold: < %.2f\n", p_threshold))
-cat("\n")
+cat(sprintf("  P-value threshold: < %.2f\n\n", p_threshold))
+
+# Honest note
+if (threshold_mode %in% c("uniform", "linear")) {
+  cat("  ⚠ Warning: thresholds are correlated → N_Suspect is inflated.\n")
+  cat("           Interpret this as 'signal persistence', not as\n")
+  cat("           'the number of independent lines of evidence'.\n\n")
+}
 
 # Analysis loop
 resultados_por_threshold <- list()
 
 for (thresh in thresholds) {
-  
+
   low_dna <- names(dna_load)[dna_load <= thresh]
   high_dna <- names(dna_load)[dna_load > thresh]
-  
+
   if(length(low_dna) < 3 || length(high_dna) < 3) next
-  
+
   res <- data.frame(
     Species_ID = rownames(otu_filt),
     Genus = tax_filt$Genus,
@@ -303,30 +377,31 @@ for (thresh in thresholds) {
     Prevalence = rowSums(otu_filt > 0),
     stringsAsFactors = FALSE
   )
-  
+
   # Preserve full taxonomy
   for(rank in c("Phylum", "Class", "Order", "Family")) {
     if(rank %in% colnames(tax_filt)) {
       res[[rank]] <- tax_filt[[rank]]
     }
   }
-  
+
   res$RelAbund_Low <- NA
   res$RelAbund_High <- NA
   res$FoldChange <- NA
   res$Wilcoxon_p <- NA
+  res$Wilcoxon_p_raw <- NA   # for reference
   res$Direction <- NA
-  
+
   for (i in 1:nrow(otu_filt)) {
     reads_sp <- as.numeric(otu_filt[i, ])
-    rel_abund <- reads_sp / totais_amostra * 100
-    
+    rel_abund <- reads_sp / total_reads_per_sample * 100
+
     rel_low <- rel_abund[low_dna]
     rel_high <- rel_abund[high_dna]
-    
+
     res$RelAbund_Low[i] <- mean(rel_low, na.rm = TRUE)
     res$RelAbund_High[i] <- mean(rel_high, na.rm = TRUE)
-    
+
     if(res$RelAbund_High[i] > 0) {
       res$FoldChange[i] <- res$RelAbund_Low[i] / res$RelAbund_High[i]
     } else if(res$RelAbund_Low[i] > 0) {
@@ -334,14 +409,14 @@ for (thresh in thresholds) {
     } else {
       res$FoldChange[i] <- 0
     }
-    
+
     if(sum(reads_sp > 0) >= 3) {
       teste <- tryCatch({
         wilcox.test(rel_low, rel_high, alternative = "two.sided")
       }, error = function(e) NULL)
-      
+
       if(!is.null(teste)) {
-        res$Wilcoxon_p[i] <- teste$p.value
+        res$Wilcoxon_p_raw[i] <- teste$p.value
         if(mean(rel_low) > mean(rel_high)) {
           res$Direction[i] <- "Low > High"
         } else if(mean(rel_high) > mean(rel_low)) {
@@ -352,14 +427,21 @@ for (thresh in thresholds) {
       }
     }
   }
-  
-  res$Suspect <- res$FoldChange > fc_threshold & 
-    !is.na(res$Wilcoxon_p) & 
+
+  # --- Apply the selected statistical method ---
+  if (p_method == "fdr") {
+    res$Wilcoxon_p <- p.adjust(res$Wilcoxon_p_raw, method = "BH")
+  } else {
+    res$Wilcoxon_p <- res$Wilcoxon_p_raw
+  }
+
+  res$Suspect <- res$FoldChange > fc_threshold &
+    !is.na(res$Wilcoxon_p) &
     res$Wilcoxon_p < p_threshold &
     res$Direction == "Low > High"
-  
+
   resultados_por_threshold[[as.character(thresh)]] <- res
-  
+
   cat(sprintf("  Threshold ≤ %3d ng/µL | Low: %2d | High: %2d | Suspects: %3d\n",
               thresh, length(low_dna), length(high_dna), sum(res$Suspect, na.rm=TRUE)))
 }
@@ -390,30 +472,31 @@ tabela_final$Prevalence <- rowSums(otu_filt > 0)
 for(thresh_name in names(resultados_por_threshold)) {
   res <- resultados_por_threshold[[thresh_name]]
   match_idx <- match(tabela_final$Species_ID, res$Species_ID)
-  
-  tabela_final[[paste0("FC_", thresh_name)]] <- res$FoldChange[match_idx]
-  tabela_final[[paste0("p_", thresh_name)]] <- res$Wilcoxon_p[match_idx]
-  tabela_final[[paste0("Suspect_", thresh_name)]] <- res$Suspect[match_idx]
+
+  tabela_final[[paste0("FC_", thresh_name)]]           <- res$FoldChange[match_idx]
+  tabela_final[[paste0("p_", thresh_name)]]            <- res$Wilcoxon_p[match_idx]
+  tabela_final[[paste0("p_raw_", thresh_name)]]        <- res$Wilcoxon_p_raw[match_idx]
+  tabela_final[[paste0("Suspect_", thresh_name)]]      <- res$Suspect[match_idx]
 }
 
 # Compute consistency metrics
 suspect_cols <- grep("^Suspect_", colnames(tabela_final), value = TRUE)
-fc_cols <- grep("^FC_", colnames(tabela_final), value = TRUE)
-p_cols <- grep("^p_", colnames(tabela_final), value = TRUE)
+fc_cols <- grep("^FC_[0-9]", colnames(tabela_final), value = TRUE)
+p_cols <- grep("^p_[^r]", colnames(tabela_final), value = TRUE)
 
 tabela_final$N_Suspect <- rowSums(tabela_final[, suspect_cols, drop = FALSE], na.rm = TRUE)
-tabela_final$N_FC2 <- apply(tabela_final[, fc_cols, drop = FALSE], 1, 
+tabela_final$N_FC2 <- apply(tabela_final[, fc_cols, drop = FALSE], 1,
                             function(x) sum(x > fc_threshold, na.rm = TRUE))
-tabela_final$N_p005 <- apply(tabela_final[, p_cols, drop = FALSE], 1, 
+tabela_final$N_p005 <- apply(tabela_final[, p_cols, drop = FALSE], 1,
                              function(x) sum(x < p_threshold, na.rm = TRUE))
 
-# Mean FoldChange
+# Mean fold change
 tabela_final$FC_Mean <- apply(tabela_final[, fc_cols, drop = FALSE], 1, function(x) {
   x_finite <- x[is.finite(x) & x > 0]
   if(length(x_finite) > 0) mean(x_finite) else NA
 })
 
-# Contamination Score (0-1)
+# Contamination score (0-1)
 n_thresh <- length(resultados_por_threshold)
 tabela_final$ContamScore <- (
   (pmin(tabela_final$N_Suspect / n_thresh, 1) * 0.4) +
@@ -430,37 +513,37 @@ tabela_final$EcoFilter_Level <- NA
 tabela_final$EcoFilter_Match <- NA
 
 if(use_ecological_filter && length(known_contaminants) > 0) {
-  
+
   cat("━━━ APPLYING ECOLOGICAL FILTER ━━━━━━━━━━━━━━━━━━━━━━━\n\n")
-  
+
   for(entry in known_contaminants) {
     parts <- strsplit(entry, "_")[[1]]
     if(length(parts) < 2) next
-    
+
     level <- parts[1]
     name <- paste(parts[-1], collapse="_")
-    
+
     rank_map <- c(P="Phylum", C="Class", O="Order", F="Family", G="Genus")
     rank_name <- rank_map[level]
-    
+
     if(!is.na(rank_name) && rank_name %in% colnames(tabela_final)) {
       matches <- grep(name, tabela_final[[rank_name]], ignore.case = TRUE)
-      
+
       if(length(matches) > 0) {
         new_hits <- matches[!tabela_final$EcoFilter_Hit[matches]]
         tabela_final$EcoFilter_Hit[new_hits] <- TRUE
         tabela_final$EcoFilter_Level[new_hits] <- rank_name
         tabela_final$EcoFilter_Match[new_hits] <- name
-        
-        cat(sprintf("  %-4s %-30s → %3d species removed\n", 
+
+        cat(sprintf("  %-4s %-30s → %3d species flagged\n",
                     paste0(level, ":"), name, length(new_hits)))
       }
     }
   }
-  
+
   n_eco <- sum(tabela_final$EcoFilter_Hit)
   n_eco_only <- sum(tabela_final$EcoFilter_Hit & tabela_final$N_Suspect == 0)
-  cat(sprintf("\n  ✔ %d species flagged by ecological filter (%d missed by threshold)\n", 
+  cat(sprintf("\n  ✔ %d species flagged by the ecological filter (%d missed by threshold-based detection)\n",
               n_eco, n_eco_only))
 }
 
@@ -474,8 +557,8 @@ tabela_final$Classification[tabela_final$N_Suspect >= 4 & tabela_final$N_Suspect
 tabela_final$Classification[tabela_final$N_Suspect >= 1 & tabela_final$N_Suspect < 4] <- "Low (1-3/n)"
 tabela_final$Classification[tabela_final$EcoFilter_Hit & tabela_final$N_Suspect == 0] <- "Ecological only"
 
-# Combined flag
-tabela_final$Remove <- tabela_final$N_Suspect >= 1 | tabela_final$EcoFilter_Hit
+# The final removal flag is decided after the user chooses the cutoff
+tabela_final$Remove <- NA
 
 tabela_final <- tabela_final[order(-tabela_final$ContamScore, -tabela_final$N_Suspect), ]
 
@@ -488,7 +571,7 @@ cat("\n━━━ SENSITIVITY ANALYSIS ━━━━━━━━━━━━━━
 resultados_granulares <- list()
 
 for(k in 0:n_thresh) {
-  
+
   if(k == 0) {
     spp_remover <- tabela_final[tabela_final$EcoFilter_Hit == TRUE, ]
     criterio <- "Eco only"
@@ -496,34 +579,34 @@ for(k in 0:n_thresh) {
     spp_remover <- tabela_final[tabela_final$N_Suspect >= k | tabela_final$EcoFilter_Hit == TRUE, ]
     criterio <- paste0("≥", k, "/", n_thresh)
   }
-  
+
   n_sp <- nrow(spp_remover)
   reads_rem <- sum(spp_remover$Total_Reads)
-  
+
   ids_remover <- spp_remover$Species_ID
   ps_clean <- prune_taxa(!taxa_names(ps_filtered) %in% ids_remover, ps_filtered)
-  
+
   # Diversity
   div_orig <- estimate_richness(ps_filtered, measures = c("Observed", "Shannon"))
   div_clean <- estimate_richness(ps_clean, measures = c("Observed", "Shannon"))
   rownames(div_clean) <- rownames(div_orig)
-  
+
   cor_obs <- cor(div_orig$Observed, div_clean$Observed, method = "spearman")
   cor_sha <- cor(div_orig$Shannon, div_clean$Shannon, method = "spearman")
-  
+
   # Procrustes
   ps_orig_rel <- transform_sample_counts(ps_filtered, function(x) x/sum(x))
   ps_clean_rel <- transform_sample_counts(ps_clean, function(x) x/sum(x))
-  
+
   dist_orig <- distance(ps_orig_rel, method = "bray")
   dist_clean <- distance(ps_clean_rel, method = "bray")
-  
+
   pcoa_orig <- cmdscale(dist_orig, k = 5)
   pcoa_clean <- cmdscale(dist_clean, k = 5)
-  
+
   common <- intersect(rownames(pcoa_orig), rownames(pcoa_clean))
   proc <- protest(pcoa_orig[common, ], pcoa_clean[common, ], permutations = 999)
-  
+
   resultados_granulares[[as.character(k)]] <- data.frame(
     Threshold_k = k,
     Criterion = criterio,
@@ -544,8 +627,74 @@ for(k in 0:n_thresh) {
 tabela_granular <- do.call(rbind, resultados_granulares)
 
 cat("  Sensitivity table:\n\n")
-print(tabela_granular[, c("Criterion", "Species_Removed", "Pct_Reads", 
+print(tabela_granular[, c("Criterion", "Species_Removed", "Pct_Reads",
                           "Procrustes", "Spearman_Obs")], row.names = FALSE)
+
+# ============================================================
+# 10b. INTERACTIVE CUTOFF SELECTION
+# ============================================================
+
+cat("\n━━━ THRESHOLD CUTOFF SELECTION ━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+# --- Preview ---
+cat(" Sensitivity preview (species/read removal by cutoff):\n\n")
+cat(" │ Criterion │ Sp. Rem. │ % Reads  │ Procrust. │ Spear. ρ │ Notes       │\n")
+for (i in 1:nrow(tabela_granular)) {
+  r <- tabela_granular[i, ]
+  note <- if (r$Procrustes >= 0.98 && r$Spearman_Obs >= 0.95) "recommended" else ""
+  cat(sprintf(" │ %-9s │    %3d   │  %5.1f%%  │  %.4f   │  %.4f  │ %-11s │\n",
+              r$Criterion, r$Species_Removed, r$Pct_Reads,
+              r$Procrustes, r$Spearman_Obs, note))
+}
+
+# --- Decision ---
+if (interactive_cutoff && interactive()) {
+
+  cat(" Please choose the minimum number of thresholds required to\n")
+  cat(" classify a taxon as contaminant-like.\n\n")
+  cat("   0 = ecological filter only (no threshold-based removal)\n")
+  for (kk in 1:n_thresh) {
+    r <- tabela_granular[tabela_granular$Threshold_k == kk, ]
+    if (nrow(r) == 0) next
+    cat(sprintf("   %d = ≥%d/%d thresholds  (removes %d species, %.1f%% reads)\n",
+                kk, kk, n_thresh, r$Species_Removed, r$Pct_Reads))
+  }
+  cat("\n")
+
+  repeat {
+    ans <- readline(" Minimum number of thresholds required to classify a taxon as contaminant-like: ")
+    k_sel <- suppressWarnings(as.integer(ans))
+    if (!is.na(k_sel) && k_sel >= 0 && k_sel <= n_thresh) break
+    cat(sprintf("   ⚠ Please enter an integer between 0 and %d.\n", n_thresh))
+  }
+  min_thresholds <- k_sel
+
+} else if (!is.null(min_thresholds_manual)) {
+  min_thresholds <- min_thresholds_manual
+  cat(sprintf("  ⚙ Non-interactive mode: min_thresholds = %d (manual)\n", min_thresholds))
+} else {
+  min_thresholds <- 1
+  cat("  ⚙ Non-interactive session: defaulting to min_thresholds = 1\n")
+}
+
+# --- Apply ---
+cat(sprintf("\n ✔ Cutoff selected: ≥%d/%d thresholds + ecological filter\n\n",
+            min_thresholds, n_thresh))
+
+if (min_thresholds == 0) {
+  tabela_final$Remove <- tabela_final$EcoFilter_Hit
+} else {
+  tabela_final$Remove <- tabela_final$N_Suspect >= min_thresholds |
+    tabela_final$EcoFilter_Hit
+}
+
+cat(sprintf("  Species flagged: %d (%.1f%%)\n",
+            sum(tabela_final$Remove),
+            100 * sum(tabela_final$Remove) / nrow(tabela_final)))
+cat(sprintf("  Reads flagged:   %s (%.1f%%)\n\n",
+            format(sum(tabela_final$Total_Reads[tabela_final$Remove]), big.mark=","),
+            100 * sum(tabela_final$Total_Reads[tabela_final$Remove]) /
+              sum(tabela_final$Total_Reads)))
 
 # ============================================================
 # 11. CREATE OUTPUT DIRECTORY AND SAVE RESULTS
@@ -559,7 +708,7 @@ write.table(tabela_final, file.path(output_dir, "full_contaminant_analysis.tsv")
 write.table(tabela_granular, file.path(output_dir, "sensitivity_analysis.tsv"),
             sep = "\t", quote = FALSE, row.names = FALSE)
 
-# --- Save clean phyloseq with recommended threshold (≥1) ---
+# --- Save clean phyloseq object using the selected threshold ---
 final_remove <- tabela_final$Species_ID[tabela_final$Remove]
 ps_final <- prune_taxa(!taxa_names(ps_filtered) %in% final_remove, ps_filtered)
 saveRDS(ps_final, file.path(output_dir, "phyloseq_clean.rds"))
@@ -580,7 +729,7 @@ write.table(retained_df, file.path(output_dir, "retained_species.tsv"),
 
 cat("\n━━━ GENERATING GRAPHS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-# --- Graph 1: Sensitivity Panel ---
+# --- Graph 1: Sensitivity panel ---
 png(file.path(output_dir, "01_sensitivity_panel.png"), width = 2800, height = 1400, res = 200)
 
 par(mfrow = c(1, 3), mar = c(5, 5, 4, 2))
@@ -588,8 +737,8 @@ par(mfrow = c(1, 3), mar = c(5, 5, 4, 2))
 # Species removed
 plot(tabela_granular$Threshold_k, tabela_granular$Pct_Species,
      type = "b", pch = 19, col = "#E41A1C", lwd = 2, cex = 1.5,
-     xlab = "Threshold (k/n)", ylab = "% Species removed",
-     main = "Species Removed", xaxt = "n")
+     xlab = "Threshold (k/n)", ylab = "% species removed",
+     main = "Species removed", xaxt = "n")
 axis(1, at = tabela_granular$Threshold_k, labels = tabela_granular$Criterion, las = 2, cex.axis = 0.7)
 grid(col = "grey90")
 
@@ -597,7 +746,7 @@ grid(col = "grey90")
 plot(tabela_granular$Threshold_k, tabela_granular$Procrustes,
      type = "b", pch = 19, col = "#377EB8", lwd = 2, cex = 1.5,
      xlab = "Threshold (k/n)", ylab = "Procrustes correlation",
-     main = "Community Structure Preservation", xaxt = "n",
+     main = "Community structure preservation", xaxt = "n",
      ylim = c(min(tabela_granular$Procrustes) * 0.99, 1.0))
 axis(1, at = tabela_granular$Threshold_k, labels = tabela_granular$Criterion, las = 2, cex.axis = 0.7)
 abline(h = 0.98, lty = 2, col = "darkgreen")
@@ -607,7 +756,7 @@ grid(col = "grey90")
 plot(tabela_granular$Threshold_k, tabela_granular$Spearman_Obs,
      type = "b", pch = 19, col = "#4DAF4A", lwd = 2, cex = 1.5,
      xlab = "Threshold (k/n)", ylab = "Spearman ρ (Observed)",
-     main = "Alpha Diversity Correlation", xaxt = "n",
+     main = "Alpha diversity correlation", xaxt = "n",
      ylim = c(min(tabela_granular$Spearman_Obs) * 0.99, 1.0))
 axis(1, at = tabela_granular$Threshold_k, labels = tabela_granular$Criterion, las = 2, cex.axis = 0.7)
 abline(h = 0.95, lty = 2, col = "darkgreen")
@@ -616,12 +765,12 @@ grid(col = "grey90")
 dev.off()
 cat("  ✔ 01_sensitivity_panel.png\n")
 
-# --- Graph 2: Contaminant Load by Sample ---
+# --- Graph 2: Contaminant load by sample ---
 png(file.path(output_dir, "02_contaminant_load.png"), width = 2400, height = 1600, res = 200)
 
 # Calculate % contaminants per sample
 contam_ids <- tabela_final$Species_ID[tabela_final$Remove]
-prop_contam <- colSums(otu_filt[rownames(otu_filt) %in% contam_ids, , drop = FALSE]) / 
+prop_contam <- colSums(otu_filt[rownames(otu_filt) %in% contam_ids, , drop = FALSE]) /
   colSums(otu_filt) * 100
 
 load_df <- data.frame(
@@ -635,10 +784,10 @@ par(mar = c(5, 5, 4, 2))
 plot(load_df$DNA_Load, load_df$Pct_Contaminants,
      pch = 21, bg = ifelse(load_df$Low_DNA, "#E41A1C80", "#377EB880"),
      col = "grey40", cex = 1.5,
-     xlab = "DNA Load (ng/µL)", ylab = "% Contaminant Reads",
-     main = "Contaminant Load vs DNA Concentration")
+     xlab = "DNA Load (ng/µL)", ylab = "% contaminant reads",
+     main = "Contaminant load vs DNA concentration")
 
-# Add LOESS
+# Add LOESS curve
 if(nrow(load_df) > 5) {
   lo <- loess(Pct_Contaminants ~ DNA_Load, data = load_df)
   dna_sorted <- sort(load_df$DNA_Load)
@@ -646,13 +795,13 @@ if(nrow(load_df) > 5) {
 }
 
 abline(v = thresholds[1], lty = 2, col = "darkblue")
-legend("topright", c("Low DNA", "High DNA"), pt.bg = c("#E41A1C80", "#377EB880"), 
+legend("topright", c("Low DNA", "High DNA"), pt.bg = c("#E41A1C80", "#377EB880"),
        pch = 21, bty = "n")
 
 dev.off()
 cat("  ✔ 02_contaminant_load.png\n")
 
-# --- Graph 3: Volcano Plot ---
+# --- Graph 3: Volcano plot ---
 png(file.path(output_dir, "03_volcano_plot.png"), width = 2000, height = 1800, res = 200)
 
 volcano_df <- tabela_final
@@ -669,12 +818,12 @@ volcano_df$Color[volcano_df$Classification == "Ecological only"] <- "#4DAF4A"
 par(mar = c(5, 5, 4, 2))
 plot(volcano_df$Log2FC, volcano_df$Log10p,
      pch = 21, bg = volcano_df$Color, col = "grey40", cex = 1.2,
-     xlab = expression(log[2](FoldChange)), 
+     xlab = expression(log[2](FoldChange)),
      ylab = expression(-log[10](N_Suspect + 0.1)),
-     main = "Contaminant Evidence")
+     main = "Contaminant evidence")
 
 abline(v = log2(fc_threshold), lty = 2, col = "darkred")
-legend("topright", 
+legend("topright",
        c("High", "Moderate", "Low", "Eco only"),
        pt.bg = c("#E41A1C", "#FF7F00", "#377EB8", "#4DAF4A"),
        pch = 21, bty = "n")
@@ -682,7 +831,7 @@ legend("topright",
 dev.off()
 cat("  ✔ 03_volcano_plot.png\n")
 
-# --- Graph 4: Taxonomic Distribution of Contaminants ---
+# --- Graph 4: Taxonomic distribution of contaminants ---
 png(file.path(output_dir, "04_taxonomic_distribution.png"), width = 2000, height = 1600, res = 200)
 
 contam_tax <- tabela_final[tabela_final$Remove, ]
@@ -693,13 +842,13 @@ par(mar = c(5, 12, 4, 2))
 barplot(rev(top_phyla), horiz = TRUE, las = 1,
         col = rev(brewer.pal(min(10, length(top_phyla)), "Set3")),
         border = NA,
-        main = "Contaminants by Phylum",
+        main = "Contaminants by phylum",
         xlab = "Number of species")
 
 dev.off()
 cat("  ✔ 04_taxonomic_distribution.png\n")
 
-# --- Graph 5: PCoA Before vs After ---
+# --- Graph 5: PCoA before vs after ---
 png(file.path(output_dir, "05_pcoa_before_after.png"), width = 2800, height = 1400, res = 200)
 
 ps_orig_rel <- transform_sample_counts(ps_filtered, function(x) x/sum(x))
@@ -713,8 +862,6 @@ pcoa_clean <- cmdscale(dist_clean, k = 2, eig = TRUE)
 
 var_orig <- round(100 * pcoa_orig$eig / sum(pcoa_orig$eig), 1)[1:2]
 var_clean <- round(100 * pcoa_clean$eig / sum(pcoa_clean$eig), 1)[1:2]
-
-meta_df <- as.data.frame(sample_data(ps_filtered))
 
 par(mfrow = c(1, 2), mar = c(5, 5, 4, 2))
 
@@ -794,9 +941,9 @@ cat("━━━━━━━━━━━━━━━━━━━━━━━━━
 
 cat(sprintf(" OTUs before agglomeration:  %d\n", ntaxa(ps)))
 cat(sprintf(" Species after agglomeration: %d\n", n_species))
-cat(sprintf(" OTUs consolidated:          %d (%.1f%%)\n", 
+cat(sprintf(" OTUs consolidated:          %d (%.1f%%)\n",
             ntaxa(ps) - n_species, 100*(ntaxa(ps) - n_species)/ntaxa(ps)))
-cat(sprintf(" Reads after agglomeration:  %s (100%%)\n", 
+cat(sprintf(" Reads after agglomeration:  %s (100%%)\n",
             format(sum(otu_table(ps_species)), big.mark=",")))
 cat("\n Taxonomic ranks preserved: Kingdom, Phylum, Class, Order, Family, Genus, Species\n")
 
@@ -807,13 +954,13 @@ cat("━━━━━━━━━━━━━━━━━━━━━━━━━
 
 cat(sprintf(" Filter criteria:\n"))
 cat(sprintf("   • Prevalence ≥ %d samples\n", prevalence_min))
-cat(sprintf("   • Total abundance ≥ %d reads (~%.3f%% relative abundance)\n", 
+cat(sprintf("   • Total abundance ≥ %d reads (~%.3f%% relative abundance)\n",
             abundance_min, 100*abundance_min/sum(otu_table(ps_species))))
 
 cat(sprintf("\n Species before filters:     %d\n", n_species))
 cat(sprintf(" Species after filters:      %d\n", ntaxa(ps_filtered)))
-cat(sprintf(" Species removed:            %d (%.1f%%)\n", 
-            n_species - ntaxa(ps_filtered), 
+cat(sprintf(" Species removed:            %d (%.1f%%)\n",
+            n_species - ntaxa(ps_filtered),
             100*(n_species - ntaxa(ps_filtered))/n_species))
 
 reads_before_filter <- sum(otu_table(ps_species))
@@ -831,16 +978,33 @@ cat("\n━━━━━━━━━━━━━━━━━━━━━━━━�
 cat(" 5. MULTI-THRESHOLD CONTAMINANT DETECTION\n")
 cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-cat(" Parameters:\n")
-cat(sprintf("   • DNA thresholds:      %s ng/µL\n", paste(thresholds, collapse=", ")))
-cat(sprintf("   • Starting quantile:   %.0fth percentile\n", start_quantile*100))
-cat(sprintf("   • Fold-change > %.1f\n", fc_threshold))
-cat(sprintf("   • Wilcoxon p < %.2f\n", p_threshold))
-cat(sprintf("   • Number of thresholds: %d\n", n_thresh))
-cat(sprintf("   • Ecological filter:   %s\n", if(use_ecological_filter) "ENABLED" else "DISABLED"))
-if(use_ecological_filter) {
-  cat(sprintf("   • Known contaminant taxa loaded: %d\n", length(known_contaminants)))
+cat(sprintf("   • Threshold mode:        %s\n", toupper(threshold_mode)))
+if (threshold_mode == "quantile") {
+  cat("     → balanced and approximately independent tests\n")
+  cat("     → N_Suspect is interpretable as the number of distinct cutoff events\n")
+} else if (threshold_mode == "uniform") {
+  cat("     → test focused on the low-DNA extreme (Salter/Karstens)\n")
+  cat("     → N_Suspect reflects persistence of the signal in the low-DNA range\n")
+} else if (threshold_mode == "linear") {
+  cat("     → spaced tests, but groups may be imbalanced at the low end\n")
 }
+
+cat(" Parameters:\n")
+cat(sprintf("   • DNA thresholds:        %s ng/µL\n", paste(thresholds, collapse=", ")))
+cat(sprintf("   • Starting quantile:     %.0fth percentile\n", start_quantile*100))
+cat(sprintf("   • Threshold step:        %d ng/µL (%s)\n",
+            threshold_step,
+            ifelse(is.null(threshold_step), "data-driven", "user-defined")))
+cat(sprintf("   • Fold-change > %.1f\n", fc_threshold))
+cat(sprintf("   • Statistical method:    %s\n",
+            ifelse(p_method == "fdr", "FDR-adjusted (BH)", "raw p-value")))
+cat(sprintf("   • P-value threshold:     < %.2f\n", p_threshold))
+cat(sprintf("   • Number of thresholds:  %d\n", n_thresh))
+cat(sprintf("   • Chosen cutoff:         ≥%d/%d %s\n",
+            min_thresholds, n_thresh,
+            ifelse(min_thresholds == 0, "(ecological only)", "+ ecological")))
+cat(sprintf("   • Ecological filter:     %s\n",
+            if(use_ecological_filter) "ENABLED" else "DISABLED"))
 
 cat("\n Threshold-by-threshold summary:\n")
 cat(" ─────────────────────────────────────────────────────────────\n")
@@ -869,7 +1033,7 @@ for(cl in class_order) {
   if(cl %in% names(class_counts)) {
     n_cl <- class_counts[cl]
     reads_cl <- sum(tabela_final$Total_Reads[tabela_final$Classification == cl])
-    cat(sprintf("   %-25s %4d species  %8s reads  (%5.1f%%)\n", 
+    cat(sprintf("   %-25s %4d species  %8s reads  (%5.1f%%)\n",
                 paste0(cl, ":"), n_cl,
                 format(reads_cl, big.mark=","),
                 100*reads_cl/sum(tabela_final$Total_Reads)))
@@ -878,24 +1042,24 @@ for(cl in class_order) {
 cat(" ─────────────────────────────────────────────────────────────\n")
 
 cat(sprintf("\n Total species analyzed:     %d\n", nrow(tabela_final)))
-cat(sprintf(" Total species flagged:      %d (%.1f%%)\n", 
+cat(sprintf(" Total species flagged:      %d (%.1f%%)\n",
             sum(tabela_final$Remove), 100*sum(tabela_final$Remove)/nrow(tabela_final)))
-cat(sprintf("   • By threshold only:      %d\n", 
+cat(sprintf("   • By threshold only:      %d\n",
             sum(tabela_final$N_Suspect >= 1 & !tabela_final$EcoFilter_Hit)))
-cat(sprintf("   • By ecology only:        %d\n", 
+cat(sprintf("   • By ecology only:        %d\n",
             sum(tabela_final$N_Suspect == 0 & tabela_final$EcoFilter_Hit)))
-cat(sprintf("   • By both:                %d\n", 
+cat(sprintf("   • By both:                %d\n",
             sum(tabela_final$N_Suspect >= 1 & tabela_final$EcoFilter_Hit)))
 
 # --- REMOVAL IMPACT ---
 cat("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-cat(" 7. REMOVAL IMPACT (≥1/9 + Ecological)\n")
+cat(sprintf(" 7. REMOVAL IMPACT (≥%d/%d + ecological)\n", min_thresholds, n_thresh))
 cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
 cat(sprintf(" Species before cleaning:    %d\n", ntaxa(ps_filtered)))
-cat(sprintf(" Species removed:            %d (%.1f%%)\n", 
+cat(sprintf(" Species removed:            %d (%.1f%%)\n",
             sum(tabela_final$Remove), 100*sum(tabela_final$Remove)/ntaxa(ps_filtered)))
-cat(sprintf(" Species retained:           %d (%.1f%%)\n", 
+cat(sprintf(" Species retained:           %d (%.1f%%)\n",
             ntaxa(ps_final), 100*ntaxa(ps_final)/ntaxa(ps_filtered)))
 
 reads_before <- sum(otu_table(ps_filtered))
@@ -903,9 +1067,9 @@ reads_after <- sum(otu_table(ps_final))
 reads_removed <- reads_before - reads_after
 
 cat(sprintf("\n Reads before cleaning:      %s\n", format(reads_before, big.mark=",")))
-cat(sprintf(" Reads removed:              %s (%.1f%%)\n", 
+cat(sprintf(" Reads removed:              %s (%.1f%%)\n",
             format(reads_removed, big.mark=","), 100*reads_removed/reads_before))
-cat(sprintf(" Reads retained:             %s (%.1f%%)\n", 
+cat(sprintf(" Reads retained:             %s (%.1f%%)\n",
             format(reads_after, big.mark=","), 100*reads_after/reads_before))
 cat(sprintf(" Mean reads/sample:          %.0f (range: %d – %d)\n",
             mean(colSums(otu_table(ps_final))),
@@ -917,41 +1081,35 @@ cat("\n━━━━━━━━━━━━━━━━━━━━━━━━�
 cat(" 8. SENSITIVITY ANALYSIS (all thresholds)\n")
 cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-cat(" ┌──────────┬──────────┬──────────┬──────────┬─────────────┬──────────────┐\n")
-cat(" │ Criterion│ Sp. Rem. │ %% Sp Rem │ %% Reads  │ Procrustes  │ Spearman Obs │\n")
-cat(" ├──────────┼──────────┼──────────┼──────────┼─────────────┼──────────────┤\n")
+cat(" │ Criterion │ Sp. Rem. │ % Sp Rem │ % Reads │ Procrustes │ Spearman Obs │\n")
 for(i in 1:nrow(tabela_granular)) {
   row <- tabela_granular[i, ]
-  cat(sprintf(" │ %-8s │    %3d   │   %5.1f  │   %5.1f  │    %.4f    │    %.4f    │\n",
+  cat(sprintf(" │ %-9s │    %3d   │   %5.1f  │   %5.1f  │    %.4f    │    %.4f    │\n",
               row$Criterion, row$Species_Removed, row$Pct_Species,
               row$Pct_Reads, row$Procrustes, row$Spearman_Obs))
 }
-cat(" └──────────┴──────────┴──────────┴──────────┴─────────────┴──────────────┘\n")
 
 # --- TOP CONTAMINANTS ---
 cat("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-cat(" 9. TOP CONTAMINANTS (by Contamination Score)\n")
+cat(" 9. TOP CONTAMINANTS (by contamination score)\n")
 cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
 top_contam <- head(tabela_final[tabela_final$Remove, ], 30)
 
-cat(" ┌──────┬──────────────────────────────────────────┬──────────┬──────────┬──────────┬──────────┐\n")
 cat(" │ Rank │ Species                                  │ Score    │ FC Mean  │ N_Susp   │ Reason   │\n")
-cat(" ├──────┼──────────────────────────────────────────┼──────────┼──────────┼──────────┼──────────┤\n")
 for(i in 1:min(30, nrow(top_contam))) {
   sp <- top_contam[i, ]
   nome <- paste0(sp$Genus, " ", sp$Species)
   if(nchar(nome) > 40) nome <- paste0(substr(nome, 1, 37), "...")
-  
-  reason <- if(sp$N_Suspect >= 1 && sp$EcoFilter_Hit) "Both" 
-  else if(sp$N_Suspect >= 1) "Threshold" 
+
+  reason <- if(sp$N_Suspect >= 1 && sp$EcoFilter_Hit) "Both"
+  else if(sp$N_Suspect >= 1) "Threshold"
   else "Ecology"
-  
+
   cat(sprintf(" │ %4d │ %-40s │ %8.3f │ %8.1f │ %4d/%-2d  │ %-8s │\n",
-              i, nome, sp$ContamScore, sp$FC_Mean, 
+              i, nome, sp$ContamScore, sp$FC_Mean,
               sp$N_Suspect, n_thresh, reason))
 }
-cat(" └──────┴──────────────────────────────────────────┴──────────┴──────────┴──────────┴──────────┘\n")
 
 # --- TAXONOMIC BREAKDOWN ---
 cat("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
@@ -985,7 +1143,7 @@ cat("   • sensitivity_analysis.tsv         — Threshold comparison table\n")
 cat("   • removed_species.tsv              — Removed species with reasons\n")
 cat("   • retained_species.tsv             — Retained species\n")
 cat("\n Figures:\n")
-cat("   • 01_sensitivity_panel.png         — Elbow plots for threshold selection\n")
+cat("   • 01_sensitivity_panel.png         — Threshold selection elbow plots\n")
 cat("   • 02_contaminant_load.png          — % contaminants vs DNA concentration\n")
 cat("   • 03_volcano_plot.png              — Fold-change vs evidence\n")
 cat("   • 04_taxonomic_distribution.png    — Contaminants by phylum\n")
@@ -998,36 +1156,37 @@ cat("\n━━━━━━━━━━━━━━━━━━━━━━━━�
 cat("12. COMPLETE PIPELINE SUMMARY\n")
 cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-cat(" ┌─────────────────────────────────────────────────────────────────────────────┐\n")
+cat(" ┌───────────────────────────────────────────────────────────────┐\n")
 cat(" │ PIPELINE STEP                            OTUs/Species          Reads         │\n")
-cat(" ├─────────────────────────────────────────────────────────────────────────────┤\n")
+cat(" ├───────────────────────────────────────────────────────────────┤\n")
 
 # Step 1: Raw
-cat(sprintf(" │ 1. Raw input                              %6d              %13s │\n", 
+cat(sprintf(" │ 1. Raw input                              %6d              %13s │\n",
             nrow(otu_raw), format(sum(otu_raw), big.mark=",")))
 
-# Step 2: Aligned (Fungi only - we don't filter non-fungi here, but could)
-cat(sprintf(" │ 2. Aligned (samples × OTUs)              %6d              %13s │\n", 
+# Step 2: Aligned
+cat(sprintf(" │ 2. Aligned (samples × OTUs)              %6d              %13s │\n",
             nrow(otu_aligned), format(sum(otu_aligned), big.mark=",")))
 
 # Step 3: Species agglomeration
-cat(sprintf(" │ 3. Species-level agglomeration           %6d              %13s │\n", 
+cat(sprintf(" │ 3. Species-level agglomeration           %6d              %13s │\n",
             n_species, format(sum(otu_table(ps_species)), big.mark=",")))
 
 # Step 4: Quality filters
-cat(sprintf(" │ 4. Quality filters (prev≥%d, abund≥%d)     %6d              %13s │\n", 
+cat(sprintf(" │ 4. Quality filters (prev≥%d, abund≥%d)     %6d              %13s │\n",
             prevalence_min, abundance_min,
             ntaxa(ps_filtered), format(sum(otu_table(ps_filtered)), big.mark=",")))
 
 # Step 5: Contaminant removal
-cat(sprintf(" │ 5. Contaminant removal (≥1/9 + eco)      %6d              %13s │\n", 
+cat(sprintf(" │ 5. Contaminant removal (≥%d/%d + eco)      %6d              %13s │\n",
+            min_thresholds, n_thresh,
             ntaxa(ps_final), format(sum(otu_table(ps_final)), big.mark=",")))
 
-cat(" └─────────────────────────────────────────────────────────────────────────────┘\n\n")
+cat(" └───────────────────────────────────────────────────────────────┘\n")
 
-cat(sprintf(" Overall reads retained: %.1f%% of raw input\n", 
+cat(sprintf(" Overall reads retained: %.1f%% of raw input\n",
             100*sum(otu_table(ps_final))/sum(otu_raw)))
-cat(sprintf(" Overall species retained: %.1f%% of agglomerated species\n", 
+cat(sprintf(" Overall species retained: %.1f%% of agglomerated species\n",
             100*ntaxa(ps_final)/n_species))
 
 # --- PARAMETERS REFERENCE ---
@@ -1036,7 +1195,7 @@ cat("13. PARAMETERS & CITATIONS\n")
 cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
 cat(" Software: MycoSifter v1.0\n")
-cat(" URL: https://github.com/[user]/MycoSifter\n\n")
+cat(" URL: https://github.com/zagalom/MycoSifter\n\n")
 
 cat(" Key references:\n")
 cat("   • Salter et al. (2014) BMC Biology 12:87\n")
@@ -1045,6 +1204,18 @@ cat("   • Davis et al. (2018) Microbiome 6:226\n")
 cat("     decontam: statistical identification of contaminants\n")
 cat("   • Karstens et al. (2019) mSystems 4:e00290-19\n")
 cat("     Contamination in low-biomass microbiome samples\n\n")
+
+cat("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+cat("14. USER-DEFINED PARAMETERS\n")
+cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+cat(sprintf(" Chosen cutoff:       ≥%d/%d thresholds\n", min_thresholds, n_thresh))
+cat(sprintf(" Statistical method:  %s\n",
+            ifelse(p_method == "fdr", "FDR-adjusted (BH)", "raw p-value")))
+if (!is.null(threshold_step)) {
+  cat(sprintf(" Threshold step:      %d ng/µL\n", threshold_step))
+} else {
+  cat(sprintf(" Threshold step:      n/a (mode: %s)\n", threshold_mode))
+}
 
 cat("========================================\n")
 cat(" END OF REPORT\n")
@@ -1068,5 +1239,5 @@ cat(sprintf("║  Species retained: %4d                               ║\n", nt
 cat(sprintf("║  Reads retained:   %.1f%%                             ║\n",
             100*sum(otu_table(ps_final))/sum(otu_table(ps_filtered))))
 cat("╠══════════════════════════════════════════════════════╣\n")
-cat("║  Output: contaminant_analysis_output/                ║\n")
+cat("║  Output directory: contaminant_analysis_output/       ║\n")
 cat("╚══════════════════════════════════════════════════════╝\n\n")
