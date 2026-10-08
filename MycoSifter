@@ -48,9 +48,7 @@ threshold_mode <- "quantile"
 n_thresholds      <- 9          # number of thresholds (only for quantile/linear)
 start_quantile    <- 0.10       # lower bound (classic/linear) or quantile_min
 quantile_max      <- 0.25       # upper percentile for quantile mode
-# (0.25 = first quartile | 0.50 = median | 0.75 = third quartile | 0.90 = very high, not recommended)
-# beyond this point, the "High" group contains <10% of samples,
-# and the test loses statistical power
+# (0.25 = first quartile | 0.50 = median | 0.75 = third quartile and so on...)
 threshold_max_frac <- 0.25      # absolute cap (fraction of max DNA) — applied to ALL modes
 threshold_step    <- NULL       # NULL = data-driven
 custom_thresholds <- NULL       # example: c(5, 10, 20, 40, 80)
