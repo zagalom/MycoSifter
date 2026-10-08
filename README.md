@@ -208,7 +208,7 @@ Determines how to generate a series of DNA concentration cutoff values.
   - **Best for:** exploratory analysis and when sample sizes are balanced
   - **Interpretation:** `N_Suspect` is interpretable as the number of independent thresholds supporting contaminant status
 
-- **`"uniform"` (classic low-biomass)**
+- **`"classic"` (classic low-biomass)**
   - Generates thresholds at fixed intervals (e.g., 5 ng/µL steps)
   - Based on Salter *et al.* (2014) and Karstens *et al.* (2019)
   - **Pros:** Intuitive interpretation; biologically meaningful spacing
@@ -218,7 +218,7 @@ Determines how to generate a series of DNA concentration cutoff values.
 
 - **`"linear"`**
   - Generates evenly-spaced thresholds in ng/µL across the data range
-  - **Pros:** Balance between quantile and uniform modes
+  - **Pros:** Balance between quantile and classic modes
   - **Cons:** Still somewhat correlated at extremes
   - **Best for:** intermediate scenarios
 
@@ -228,7 +228,7 @@ Determines how to generate a series of DNA concentration cutoff values.
 
 #### `n_thresholds`
 
-Number of thresholds to generate (for `quantile`, `uniform`, and `linear` modes).
+Number of thresholds to generate (for `quantile`, `classic`, and `linear` modes).
 
 - **Default:** `9`
 - **Range:** 3–15 (minimum 3 required for sensitivity analysis)
@@ -236,7 +236,7 @@ Number of thresholds to generate (for `quantile`, `uniform`, and `linear` modes)
 
 #### `start_quantile`
 
-Lower bound for threshold generation (only for `quantile`, `uniform`, and `linear` modes).
+Lower bound for threshold generation (only for `quantile`, `classic`, and `linear` modes).
 
 - **Default:** `0.10` (10th percentile)
 - **Range:** 0–1
@@ -264,7 +264,7 @@ Absolute cap on thresholds as a fraction of maximum DNA concentration (applied t
 
 #### `threshold_step`
 
-(For `uniform` and `linear` modes) Fixed step size in ng/µL between consecutive thresholds.
+(For `classic` and `linear` modes) Fixed step size in ng/µL between consecutive thresholds.
 
 - **Default:** `NULL` (data-driven: automatically calculated)
 - **Example:** `threshold_step <- 5` creates thresholds at 5, 10, 15, 20 ng/µL…
@@ -416,7 +416,7 @@ p_threshold  <- 0.05            # Standard p-value
 p_method <- "raw"               # Raw p-values (faster, more sensitive)
 
 # Threshold mode
-threshold_mode <- "uniform"     # Classic low-biomass approach
+threshold_mode <- "classic"     # Classic low-biomass approach
 n_thresholds <- 7
 start_quantile <- 0.10
 threshold_step <- 5             # 5 ng/µL steps
@@ -582,12 +582,12 @@ The sensitivity analysis compares outcomes at different stringency levels (k):
 ### Q: How do I choose between `threshold_mode` options?
 **A:** 
 - **`"quantile"`** (default): Start here for most analyses. Balanced and approximately independent tests.
-- **`"uniform"`**: Use if you want biologically meaningful DNA thresholds (e.g., 5 ng/µL steps) or if your sample sizes are very small.
+- **`"classic"`**: Use if you want biologically meaningful DNA thresholds (e.g., 5 ng/µL steps) or if your sample sizes are very small.
 - **`"custom"`**: Use if you have specific hypotheses about contamination thresholds.
 
 ### Q: What's the difference between `p_method = "raw"` and `"fdr"`?
 **A:**
-- **`"raw"`**: No correction for multiple comparisons. Faster and more sensitive, but higher false positive rate.
+- **`"raw"`**: No correction for multiple comparisons. Faster and more sensitive, but with a higher false positive rate.
 - **`"fdr"`**: Benjamini-Hochberg correction. More conservative (may be more suitable for publication)
 
 ### Q: How do I know what `min_thresholds` to choose?
