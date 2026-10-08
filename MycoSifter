@@ -24,7 +24,6 @@
 # ============================================================
 # 0. USER CONFIGURATION
 # ============================================================
-
 # --- INPUT FILES ---
 otu_file <- "otu_table.tsv"
 tax_file <- "taxonomy.tsv"
@@ -39,16 +38,15 @@ fc_threshold <- 2
 p_threshold  <- 0.05
 
 # --- THRESHOLD DESIGN MODE ---
-threshold_mode <- "quantile"   
-# "quantile" = balanced groups
-# "classic"  = classic Salter method (focused on the low-DNA end)
+threshold_mode <- "quantile"   # "quantile" = balanced groups 
+#"classic"  = classic Salter method (focused on the low-DNA end)
 # "linear"   = uniform spacing until reaching the number of thresholds defined
 # "custom"   = uniform spacing until reaching the max fraction defined
 
 n_thresholds      <- 9          # number of thresholds (only for quantile/linear)
 start_quantile    <- 0.10       # lower bound (classic/linear) or quantile_min
 quantile_max      <- 0.25       # upper percentile for quantile mode
-# (0.25 = first quartile | 0.50 = median | 0.75 = third quartile and so on...)
+# (0.25 = 1st quartile | 0.50 = median | 0.75 = 3rd quartile and so on)
 threshold_max_frac <- 0.25      # absolute cap (fraction of max DNA) — applied to ALL modes
 threshold_step    <- NULL       # NULL = data-driven
 custom_thresholds <- NULL       # example: c(5, 10, 20, 40, 80)
@@ -59,15 +57,18 @@ min_thresholds_manual <- NULL   # used when interactive_cutoff = FALSE
 # NULL → default = 3
 
 # --- STATISTICAL METHOD ---
-p_method <- "raw"           
-# "raw" = raw p-value 
-# "fdr" = adjusted p-value (Benjamini-Hochberg)
+p_method <- "raw"     # "raw" = raw p-value; "fdr" = adjusted p-value (Benjamini-Hochberg)
 
 # --- USE ECOLOGICAL FILTER? ---
 use_ecological_filter <- TRUE  # If TRUE, also remove taxa listed in known_contaminants.txt
 
 # --- OUTPUT ---
 output_dir <- "contaminant_analysis_output_New"
+
+# --- QUALITY FILTERS ---
+use_quality_filter <- TRUE      # TRUE = apply prevalence/abundance filters
+prevalence_min     <- 3         # minimum number of samples with >0 reads
+abundance_min      <- 30        # minimum total reads across all samples
 
 # ============================================================
 # 1. LOAD REQUIRED PACKAGES
@@ -259,26 +260,64 @@ cat(sprintf("  ✔ %d species-level taxa (from %d OTUs)\n", n_species, ntaxa(ps)
 cat("  ✔ Full taxonomy preserved: Kingdom to Species\n")
 
 # ============================================================
-# 5. QUALITY FILTERS
+# 5. QUALITY FILTERS (optional)
 # ============================================================
 
 cat("\n━━━ APPLYING QUALITY FILTERS ━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-prevalence_min <- 3
-abundance_min <- 30
-
-ps_filtered <- filter_taxa(ps_species,
-                           function(x) sum(x > 0) >= prevalence_min &
-                             sum(x) >= abundance_min,
-                           prune = TRUE)
-
-cat(sprintf("  Prevalence ≥ %d samples, abundance ≥ %d total reads\n",
-            prevalence_min, abundance_min))
-cat(sprintf("  ✔ %d species retained (%.1f%%)\n",
-            ntaxa(ps_filtered), 100*ntaxa(ps_filtered)/n_species))
-cat(sprintf("  ✔ %s reads retained (%.1f%%)\n",
-            format(sum(otu_table(ps_filtered)), big.mark=","),
-            100*sum(otu_table(ps_filtered))/sum(otu_table(ps_species))))
+if (!use_quality_filter) {
+  
+  cat("  ⚙ Quality filters DISABLED by user configuration.\n")
+  cat("    → All species proceed to contaminant detection.\n")
+  ps_filtered <- ps_species
+  
+} else {
+  
+  # Build the filter function based on which criteria the user activated
+  use_prev <- !is.null(prevalence_min) && !is.na(prevalence_min)
+  use_abund <- !is.null(abundance_min)   && !is.na(abundance_min)
+  
+  if (!use_prev && !use_abund) {
+    cat("  ⚠ Both prevalence_min and abundance_min are NULL/NA.\n")
+    cat("    → No filtering will be applied. Set use_quality_filter = FALSE\n")
+    cat("      if this is intentional.\n")
+    ps_filtered <- ps_species
+  } else {
+    
+    # Report which filters are active
+    if (use_prev && use_abund) {
+      cat(sprintf("  Prevalence ≥ %d samples AND abundance ≥ %d total reads\n",
+                  prevalence_min, abundance_min))
+      ps_filtered <- filter_taxa(
+        ps_species,
+        function(x) sum(x > 0) >= prevalence_min & sum(x) >= abundance_min,
+        prune = TRUE
+      )
+    } else if (use_prev) {
+      cat(sprintf("  Prevalence ≥ %d samples (abundance filter DISABLED)\n",
+                  prevalence_min))
+      ps_filtered <- filter_taxa(
+        ps_species,
+        function(x) sum(x > 0) >= prevalence_min,
+        prune = TRUE
+      )
+    } else {
+      cat(sprintf("  Abundance ≥ %d total reads (prevalence filter DISABLED)\n",
+                  abundance_min))
+      ps_filtered <- filter_taxa(
+        ps_species,
+        function(x) sum(x) >= abundance_min,
+        prune = TRUE
+      )
+    }
+    
+    cat(sprintf("  ✔ %d species retained (%.1f%%)\n",
+                ntaxa(ps_filtered), 100*ntaxa(ps_filtered)/n_species))
+    cat(sprintf("  ✔ %s reads retained (%.1f%%)\n",
+                format(sum(otu_table(ps_filtered)), big.mark=","),
+                100*sum(otu_table(ps_filtered))/sum(otu_table(ps_species))))
+  }
+}
 
 # ============================================================
 # 6. MULTI-THRESHOLD CONTAMINANT DETECTION
