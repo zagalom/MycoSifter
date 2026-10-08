@@ -39,28 +39,30 @@ fc_threshold <- 2
 p_threshold  <- 0.05
 
 # --- THRESHOLD DESIGN MODE ---
-threshold_mode <- "quantile"   # "quantile" = recommended (balanced groups)
-# "uniform"  = classic Salter method (focused on the low-DNA end)
-# "linear"   = uniform spacing
-# "custom"   = explicit vector
+threshold_mode <- "quantile"   
+# "quantile" = balanced groups
+# "classic"  = classic Salter method (focused on the low-DNA end)
+# "linear"   = uniform spacing until reaching the number of thresholds defined
+# "custom"   = uniform spacing until reaching the max fraction defined
 
 n_thresholds      <- 9          # number of thresholds (only for quantile/linear)
-start_quantile    <- 0.10       # lower bound (uniform/linear) or quantile_min
-quantile_max      <- 0.50       # upper percentile for quantile mode
-# (0.50 = median | 0.75 = third quartile | 0.90 = default)
+start_quantile    <- 0.10       # lower bound (classic/linear) or quantile_min
+quantile_max      <- 0.25       # upper percentile for quantile mode
+# (0.25 = first quartile | 0.50 = median | 0.75 = third quartile | 0.90 = very high, not recommended)
 # beyond this point, the "High" group contains <10% of samples,
 # and the test loses statistical power
-threshold_max_frac <- 0.50      # absolute cap (fraction of max DNA) — applied to ALL modes
+threshold_max_frac <- 0.25      # absolute cap (fraction of max DNA) — applied to ALL modes
 threshold_step    <- NULL       # NULL = data-driven
 custom_thresholds <- NULL       # example: c(5, 10, 20, 40, 80)
 
 # --- CUTOFF SELECTION ---
 interactive_cutoff <- TRUE      # TRUE = ask the user after analysis
 min_thresholds_manual <- NULL   # used when interactive_cutoff = FALSE
-# NULL → default = 1
+# NULL → default = 3
 
 # --- STATISTICAL METHOD ---
-p_method <- "raw"           # "raw" = raw p-value (default)
+p_method <- "raw"           
+# "raw" = raw p-value 
 # "fdr" = adjusted p-value (Benjamini-Hochberg)
 
 # --- USE ECOLOGICAL FILTER? ---
@@ -318,10 +320,10 @@ if (threshold_mode == "custom" && !is.null(custom_thresholds)) {
   q1 <- quantile(dna_load, start_quantile, na.rm = TRUE)
   start_threshold <- max(floor(q1 / 5) * 5, 5)
 
-  if (threshold_mode == "uniform") {
+  if (threshold_mode == "classic") {
     step <- if (is.null(threshold_step)) 5 else threshold_step
     thresholds <- seq(start_threshold, max_use, by = step)
-    cat(sprintf("  Threshold mode: UNIFORM (classic low-biomass, step=%d ng/µL)\n", step))
+    cat(sprintf("  Threshold mode: classic (classic low-biomass, step=%d ng/µL)\n", step))
 
   } else {  # linear
     if (is.null(threshold_step)) {
@@ -353,7 +355,7 @@ cat(sprintf("  Fold-change threshold: > %.1f\n", fc_threshold))
 cat(sprintf("  P-value threshold: < %.2f\n\n", p_threshold))
 
 # Honest note
-if (threshold_mode %in% c("uniform", "linear")) {
+if (threshold_mode %in% c("classic", "linear")) {
   cat("  ⚠ Warning: thresholds are correlated → N_Suspect is inflated.\n")
   cat("           Interpret this as 'signal persistence', not as\n")
   cat("           'the number of independent lines of evidence'.\n\n")
@@ -982,7 +984,7 @@ cat(sprintf("   • Threshold mode:        %s\n", toupper(threshold_mode)))
 if (threshold_mode == "quantile") {
   cat("     → balanced and approximately independent tests\n")
   cat("     → N_Suspect is interpretable as the number of distinct cutoff events\n")
-} else if (threshold_mode == "uniform") {
+} else if (threshold_mode == "classic") {
   cat("     → test focused on the low-DNA extreme (Salter/Karstens)\n")
   cat("     → N_Suspect reflects persistence of the signal in the low-DNA range\n")
 } else if (threshold_mode == "linear") {
