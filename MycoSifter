@@ -673,19 +673,6 @@ print(tabela_granular[, c("Criterion", "Species_Removed", "Pct_Reads",
 # 10b. INTERACTIVE CUTOFF SELECTION
 # ============================================================
 
-cat("\n━━━ THRESHOLD CUTOFF SELECTION ━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
-
-# --- Preview ---
-cat(" Sensitivity preview (species/read removal by cutoff):\n\n")
-cat(" │ Criterion │ Sp. Rem. │ % Reads  │ Procrust. │ Spear. ρ │ Notes       │\n")
-for (i in 1:nrow(tabela_granular)) {
-  r <- tabela_granular[i, ]
-  note <- if (r$Procrustes >= 0.98 && r$Spearman_Obs >= 0.95) "recommended" else ""
-  cat(sprintf(" │ %-9s │    %3d   │  %5.1f%%  │  %.4f   │  %.4f  │ %-11s │\n",
-              r$Criterion, r$Species_Removed, r$Pct_Reads,
-              r$Procrustes, r$Spearman_Obs, note))
-}
-
 # --- Decision ---
 if (interactive_cutoff && interactive()) {
 
