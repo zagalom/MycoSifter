@@ -991,26 +991,55 @@ cat("\n━━━━━━━━━━━━━━━━━━━━━━━━�
 cat(" 4. QUALITY FILTERS\n")
 cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-cat(sprintf(" Filter criteria:\n"))
-cat(sprintf("   • Prevalence ≥ %d samples\n", prevalence_min))
-cat(sprintf("   • Total abundance ≥ %d reads (~%.3f%% relative abundance)\n",
-            abundance_min, 100*abundance_min/sum(otu_table(ps_species))))
+if (!use_quality_filter) {
+  
+  cat(" Status: DISABLED by user configuration\n\n")
+  cat(sprintf(" Species carried forward:    %d (no filtering applied)\n", n_species))
+  cat(sprintf(" Reads carried forward:      %s (100%%)\n",
+              format(sum(otu_table(ps_species)), big.mark=",")))
+  cat(sprintf(" Mean reads/sample:          %.0f (range: %d – %d)\n",
+              mean(colSums(otu_table(ps_species))),
+              min(colSums(otu_table(ps_species))),
+              max(colSums(otu_table(ps_species)))))
+  
+} else {
+  
+  use_prev  <- !is.null(prevalence_min) && !is.na(prevalence_min)
+  use_abund <- !is.null(abundance_min)   && !is.na(abundance_min)
+  
+  cat(" Status: ENABLED\n")
+  cat(" Filter criteria:\n")
+  
+  if (use_prev) {
+    cat(sprintf("   • Prevalence ≥ %d samples\n", prevalence_min))
+  } else {
+    cat("   • Prevalence filter:  DISABLED\n")
+  }
+  
+  if (use_abund) {
+    cat(sprintf("   • Total abundance ≥ %d reads (~%.3f%% relative abundance)\n",
+                abundance_min, 100*abundance_min/sum(otu_table(ps_species))))
+  } else {
+    cat("   • Abundance filter:   DISABLED\n")
+  }
+  
+  cat(sprintf("\n Species before filters:     %d\n", n_species))
+  cat(sprintf(" Species after filters:      %d\n", ntaxa(ps_filtered)))
+  cat(sprintf(" Species removed:            %d (%.1f%%)\n",
+              n_species - ntaxa(ps_filtered),
+              100*(n_species - ntaxa(ps_filtered))/n_species))
+  
+  reads_before_filter <- sum(otu_table(ps_species))
+  reads_after_filter  <- sum(otu_table(ps_filtered))
+  cat(sprintf("\n Reads before filters:       %s\n", format(reads_before_filter, big.mark=",")))
+  cat(sprintf(" Reads after filters:        %s\n", format(reads_after_filter, big.mark=",")))
+  cat(sprintf(" Reads retained:             %.1f%%\n", 100*reads_after_filter/reads_before_filter))
+  cat(sprintf(" Mean reads/sample:          %.0f (range: %d – %d)\n",
+              mean(colSums(otu_table(ps_filtered))),
+              min(colSums(otu_table(ps_filtered))),
+              max(colSums(otu_table(ps_filtered)))))
+}
 
-cat(sprintf("\n Species before filters:     %d\n", n_species))
-cat(sprintf(" Species after filters:      %d\n", ntaxa(ps_filtered)))
-cat(sprintf(" Species removed:            %d (%.1f%%)\n",
-            n_species - ntaxa(ps_filtered),
-            100*(n_species - ntaxa(ps_filtered))/n_species))
-
-reads_before_filter <- sum(otu_table(ps_species))
-reads_after_filter <- sum(otu_table(ps_filtered))
-cat(sprintf("\n Reads before filters:       %s\n", format(reads_before_filter, big.mark=",")))
-cat(sprintf(" Reads after filters:        %s\n", format(reads_after_filter, big.mark=",")))
-cat(sprintf(" Reads retained:             %.1f%%\n", 100*reads_after_filter/reads_before_filter))
-cat(sprintf(" Mean reads/sample:          %.0f (range: %d – %d)\n",
-            mean(colSums(otu_table(ps_filtered))),
-            min(colSums(otu_table(ps_filtered))),
-            max(colSums(otu_table(ps_filtered)))))
 
 # --- MULTI-THRESHOLD PARAMETERS ---
 cat("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
@@ -1212,8 +1241,20 @@ cat(sprintf(" │ 3. Species-level agglomeration           %6d              %13s
             n_species, format(sum(otu_table(ps_species)), big.mark=",")))
 
 # Step 4: Quality filters
-cat(sprintf(" │ 4. Quality filters (prev≥%d, abund≥%d)     %6d              %13s │\n",
-            prevalence_min, abundance_min,
+filter_label <- if (!use_quality_filter) {
+  "4. Quality filters (DISABLED)"
+} else {
+  parts <- c()
+  if (!is.null(prevalence_min) && !is.na(prevalence_min))
+    parts <- c(parts, sprintf("prev≥%d", prevalence_min))
+  if (!is.null(abundance_min) && !is.na(abundance_min))
+    parts <- c(parts, sprintf("abund≥%d", abundance_min))
+  if (length(parts) == 0) parts <- "no criteria"
+  sprintf("4. Quality filters (%s)", paste(parts, collapse=", "))
+}
+
+cat(sprintf(" │ %-40s %6d              %13s │\n",
+            filter_label,
             ntaxa(ps_filtered), format(sum(otu_table(ps_filtered)), big.mark=",")))
 
 # Step 5: Contaminant removal
@@ -1255,6 +1296,18 @@ if (!is.null(threshold_step)) {
 } else {
   cat(sprintf(" Threshold step:      n/a (mode: %s)\n", threshold_mode))
 }
+cat(sprintf(" Quality filter:      %s\n",
+            if (use_quality_filter) {
+              parts <- c()
+              if (!is.null(prevalence_min) && !is.na(prevalence_min))
+                parts <- c(parts, paste0("prev≥", prevalence_min))
+              if (!is.null(abundance_min) && !is.na(abundance_min))
+                parts <- c(parts, paste0("abund≥", abundance_min))
+              if (length(parts) == 0) parts <- "no criteria"
+              paste0("ENABLED (", paste(parts, collapse=", "), ")")
+            } else {
+              "DISABLED"
+            }))
 
 cat("========================================\n")
 cat(" END OF REPORT\n")
